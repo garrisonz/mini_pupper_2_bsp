@@ -239,3 +239,8 @@ esp32_proxy/esp32-proxy
 esp32/build
 esp32/sdkconfig
 esp32/sdkconfig.old
+
+# Local workspace settings
+.codex
+.vscode/
+esp32/.vscode/
