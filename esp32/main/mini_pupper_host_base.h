@@ -56,6 +56,7 @@
 // host instruction code
 #define INST_CONTROL 0x01   // Host sends servo position setpoints, ESP32 replies with servo feedback, attitude, ....
 #define INST_SAVECALIBRATION 0x02   // Host requests to save calibration file
+#define INST_GETCALIBRATION 0x03   // Host requests calibration file data
 
 // frame parameters format for control instruction
 struct parameters_control_instruction_format
@@ -82,5 +83,11 @@ struct parameters_control_acknowledge_format
     float current_A;
 };
 
+
+// frame parameters format for calibration acknowledge
+struct parameters_calibration_acknowledge_format
+{
+    s16 offset[12];
+};
 
 #endif //_mini_pupper_host_base_H

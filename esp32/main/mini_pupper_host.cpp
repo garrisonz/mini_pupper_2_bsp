@@ -17,6 +17,7 @@ static const char* TAG = "HOST";
 #include "driver/uart.h"
 #include "esp_log.h"
 #include <string.h>
+#include <stdio.h>
 
 #define HOST_SERVER_TXD 17
 #define HOST_SERVER_RXD 18
@@ -51,6 +52,55 @@ f_monitor(_protocol_handler.f_monitor)
 static size_t const stack_size = 10000;
 static StackType_t stack[stack_size] {0};
 static StaticTask_t task_buffer;
+
+static bool read_calibration_offsets(s16 offsets[12])
+{
+    for(size_t index=0; index<12; ++index)
+    {
+        offsets[index] = 0;
+    }
+
+    FILE * f = fopen(CALIBRATE_PATH, "r");
+    if(f == NULL)
+    {
+        ESP_LOGE(TAG, "Failed to open calibration file for reading");
+        return false;
+    }
+
+    bool success = true;
+    for(size_t index=0; index<12; ++index)
+    {
+        int data {0};
+        if(fscanf(f, "%d", &data) != 1)
+        {
+            success = false;
+            break;
+        }
+        offsets[index] = data;
+    }
+    fclose(f);
+    return success;
+}
+
+static void send_calibration_ack(int uart_port_num, u8 status, s16 const offsets[12])
+{
+    parameters_calibration_acknowledge_format calibration_parameters;
+    memcpy(calibration_parameters.offset, offsets, sizeof(calibration_parameters.offset));
+
+    static size_t const tx_payload_length {1+sizeof(parameters_calibration_acknowledge_format)+1};
+    static size_t const tx_buffer_size {4+tx_payload_length};
+    u8 tx_buffer[tx_buffer_size] {
+        0xFF,
+        0xFF,
+        0x01,
+        tx_payload_length,
+        status,
+    };
+    memcpy(tx_buffer+5, &calibration_parameters, sizeof(parameters_calibration_acknowledge_format));
+    tx_buffer[tx_buffer_size-1] = compute_checksum(tx_buffer);
+
+    uart_write_bytes((uart_port_t)uart_port_num, tx_buffer, tx_buffer_size);
+}
 
 void HOST::start()
 {
@@ -106,10 +156,10 @@ void HOST_TASK(void * parameters)
                             // waiting for a INST_CONTROL frame
                             if(protocol_handler.payload_buffer[0]==INST_CONTROL && protocol_handler.payload_length == sizeof(parameters_control_instruction_format)+2)
                             {
-				if(state == STATE_CALIBRATION)
-				{
-				     state = STATE_IDLE;
-				}
+                                if(state == STATE_CALIBRATION)
+                                {
+                                    state = STATE_IDLE;
+                                }
                                 // decode parameters
                                 memcpy(&host->prot_parameters,&protocol_handler.payload_buffer[1],sizeof(parameters_control_instruction_format));
 
@@ -138,17 +188,16 @@ void HOST_TASK(void * parameters)
                                 have_to_reply = true;
 
                             }
-			    else if(protocol_handler.payload_buffer[0]==INST_SAVECALIBRATION)
-			    {
-				state = STATE_CALIBRATION;
-                                // compute calibration offsets
+                            else if(protocol_handler.payload_buffer[0]==INST_SAVECALIBRATION)
+                            {
+                                state = STATE_CALIBRATION;
                                 s16 servoOffsets[12] {0};
                                 for(size_t index=0; index<12; ++ index)
                                 {
-				    s16 const stored_offset {servo.getCalibrationOffset(index)};
-				    u16 const goal_position {host->prot_parameters.goal_position[index]};
+                                    s16 const stored_offset {servo.getCalibrationOffset(index)};
+                                    u16 const goal_position {host->prot_parameters.goal_position[index]};
                                     servoOffsets[index] = (s16)REF_ZERO_POSITION - goal_position + stored_offset;
-				    host->prot_parameters.goal_position[index] = REF_ZERO_POSITION;
+                                    host->prot_parameters.goal_position[index] = REF_ZERO_POSITION;
                                 }
                                 ESP_LOGI(TAG, "Computed Offsets : %d %d %d %d %d %d %d %d %d %d %d %d",
                                     servoOffsets[0],servoOffsets[1],servoOffsets[2],
@@ -157,9 +206,9 @@ void HOST_TASK(void * parameters)
                                     servoOffsets[9],servoOffsets[10],servoOffsets[11]
                                 );
 
-                                // save to flash
                                 FILE * f = fopen(CALIBRATE_PATH, "w");
-                                if (f == NULL) {
+                                if(f == NULL)
+                                {
                                     ESP_LOGE(TAG, "Failed to open file for writing");
                                 }
                                 if(f)
@@ -171,9 +220,14 @@ void HOST_TASK(void * parameters)
                                     fclose(f);
                                     ESP_LOGI(TAG, "Calibration saved.");
                                 }
-                                // apply offset
                                 servo.setCalibration(servoOffsets);
-			    }
+                            }
+                            else if(protocol_handler.payload_buffer[0]==INST_GETCALIBRATION)
+                            {
+                                s16 servoOffsets[12] {0};
+                                u8 status = read_calibration_offsets(servoOffsets) ? 0x00 : 0x01;
+                                send_calibration_ack(host->_uart_port_num, status, servoOffsets);
+                            }
                             else
                             {
                                 ESP_LOGI(TAG, "RX unexpected frame. Instr:%d. Length:%d",protocol_handler.payload_buffer[0],protocol_handler.payload_length);

@@ -17,6 +17,10 @@ class ESP32Interface:
         load = [0.0] * 12
         return load
 
+    def get_calibration(self):
+        calibration = [0] * 12
+        return calibration
+
     def imu_get_data(self):
         imu_data = {"ax": 0.0,
                     "ay": 0.0,

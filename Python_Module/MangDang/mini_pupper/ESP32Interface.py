@@ -122,6 +122,30 @@ class ESP32Interface:
                     "gz": raw_data[5]}
         return imu_data
 
+    def get_calibration(self):
+        try:
+            self.sock.sendall(pack("BB", 2, 6))
+            data = self.sock.recv(27)
+        except Exception as e:
+            if e.errno == errno.EPIPE or e.errno == errno.ENOTCONN or e.errno == errno.EBADF:
+                self.close()
+                self.connect()
+            else:
+                print("%s" % e)
+            return None
+
+        if data[0:2] != pack("BB", 27, 6):
+            print("Invalid Ack")
+            self.close()
+            return None
+
+        if data[2] != 0:
+            print("Failed to read calibration data")
+            return None
+
+        calibration = list(unpack("12h", data[3:]))
+        return calibration
+
     def get_power_status(self):
         try:
             self.sock.sendall(pack("BB", 2, 5))

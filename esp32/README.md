@@ -24,6 +24,6 @@ idf.py set-target esp32s3
 idf.py menuconfig # you can use all default values
 idf.py build
 export ESPPORT=/dev/ttyUSB0
-idf.py monitor # set ESP32 in download mode if you use a simple serial adapter
-idf.py flash
+idf.py flash # set ESP32 in download mode if you use a simple serial adapter
+idf.py monitor
 ```

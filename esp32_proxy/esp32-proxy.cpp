@@ -29,6 +29,9 @@ struct setpoint_and_feedback_data
 {
     parameters_control_instruction_format control;
     parameters_control_acknowledge_format feedback;
+    u8 calibration_request;
+    u8 calibration_status;
+    parameters_calibration_acknowledge_format calibration;
 };
 
 // Task handling communication with ESP32
@@ -281,6 +284,72 @@ void esp32_protocol(setpoint_and_feedback_data * control_block)
             );
             printf("Power:  %.3fV  %.3fA\n", control_block->feedback.voltage_V, control_block->feedback.current_A);
 	   }
+
+        if(control_block->calibration_request)
+        {
+            size_t const tx_payload_length {2};
+            size_t const tx_buffer_size {tx_payload_length + 4};
+            u8 tx_buffer[tx_buffer_size]
+            {
+                0xFF,
+                0xFF,
+                0x01,
+                tx_payload_length,
+                INST_GETCALIBRATION
+            };
+            tx_buffer[tx_buffer_size-1] = compute_checksum(tx_buffer);
+
+            result = write(fd, (char *)tx_buffer, tx_buffer_size);
+            if(result != (ssize_t)tx_buffer_size)
+            {
+                control_block->calibration_status = 2;
+                control_block->calibration_request = 0;
+                continue;
+            }
+
+            size_t const rx_buffer_size {64};
+            u8 rx_buffer[rx_buffer_size] {0};
+            size_t const expected_length {4 + 1 + sizeof(parameters_calibration_acknowledge_format) + 1};
+            size_t received_length {0};
+            while(received_length<expected_length)
+            {
+                ssize_t read_length = read(
+                    fd,
+                    (char*)(rx_buffer+received_length),
+                    expected_length-received_length
+                );
+                if(read_length<0)
+                {
+                    control_block->calibration_status = 2;
+                    break;
+                }
+                if(read_length==0)
+                {
+                    control_block->calibration_status = 2;
+                    break;
+                }
+                received_length += read_length;
+            }
+
+            bool const rx_header_check {
+                        (received_length==expected_length)
+                    &&  (rx_buffer[0]==0xFF)
+                    &&  (rx_buffer[1]==0xFF)
+                    &&  (rx_buffer[2]==0x01)
+                    &&  (rx_buffer[3]==expected_length-4)
+            };
+            u8 expected_checksum {0};
+            if(rx_header_check && checksum(rx_buffer, expected_checksum))
+            {
+                control_block->calibration_status = rx_buffer[4];
+                memcpy(&control_block->calibration, rx_buffer+5, sizeof(parameters_calibration_acknowledge_format));
+            }
+            else
+            {
+                control_block->calibration_status = 2;
+            }
+            control_block->calibration_request = 0;
+        }
     }
 }
 
@@ -409,6 +478,23 @@ int main(int argc, char *argv[])
                     s_buffer[0]= 2 + 2*sizeof(float);
                     s_buffer[1]= INST_GETPOWER;
                     memcpy(&s_buffer[2], (char*)control_block + offset, 2*sizeof(float));
+                }
+
+                if(r_buffer[1] == INST_GETCALIB && r_buffer[0] == 2) {
+                    setpoint_and_feedback_data * shared = reinterpret_cast<setpoint_and_feedback_data*>(control_block);
+                    shared->calibration_status = 0xFF;
+                    shared->calibration_request = 1;
+                    for(int wait_count=0; wait_count<100 && shared->calibration_request; ++wait_count) {
+                        usleep(10000);
+                    }
+                    if(shared->calibration_request) {
+                        shared->calibration_status = 2;
+                        shared->calibration_request = 0;
+                    }
+                    s_buffer[0]= 3 + 12*sizeof(s16);
+                    s_buffer[1]= INST_GETCALIB;
+                    s_buffer[2]= shared->calibration_status;
+                    memcpy(&s_buffer[3], &shared->calibration, 12*sizeof(s16));
                 }
 
                 /* Send result. */
