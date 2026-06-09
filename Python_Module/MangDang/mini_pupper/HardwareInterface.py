@@ -133,7 +133,7 @@ def angle_to_servo_position(angle, pwm_params, servo_params, axis_index, leg_ind
     servo_position_f = angle_to_position(angle, servo_params, axis_index, leg_index)
     if np.isnan(servo_position_f):
         return 0
-    return int(servo_position_f)
+    return round(servo_position_f)
 
 
 def send_servo_commands(pwm_params, servo_params, joint_angles):
