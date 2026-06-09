@@ -2,8 +2,7 @@
 Description=esp32 proxy service
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
+Type=simple
 ExecStart=/var/lib/mini_pupper_bsp/esp32-proxy
 User=ubuntu
 
